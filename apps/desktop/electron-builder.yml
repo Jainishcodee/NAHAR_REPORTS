@@ -1,0 +1,45 @@
+# electron-builder configuration.
+# Run `npm run package -w @report/desktop` to produce a Windows installer in apps/desktop/release/.
+appId: com.medclinic.reportsoftware
+productName: Clinic Report Manager
+copyright: Copyright © 2026
+# Pinned so electron-builder works reliably inside an npm workspaces monorepo
+# (keep this in sync with the "electron" devDependency in package.json).
+electronVersion: 33.4.11
+
+directories:
+  buildResources: build
+  output: release
+
+# Everything the app needs is bundled by electron-vite, so there are no native
+# modules to rebuild and no node_modules to (re)install at package time. This
+# also avoids electron-builder mutating the monorepo's hoisted node_modules.
+npmRebuild: false
+
+# electron-vite outputs the compiled app to ./out — bundle that plus package.json.
+files:
+  - out/**/*
+  - package.json
+
+# Windows: produce an NSIS .exe installer (and a portable .exe).
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+  # icon: build/icon.ico   # add a 256x256 .ico here for a custom app icon
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Clinic Report Manager
+
+# For auto-updates later, point this at a shared folder or a small update server
+# and add electron-updater. Left disabled in the scaffold.
+# publish:
+#   provider: generic
+#   url: file://server/updates/clinic-report-manager

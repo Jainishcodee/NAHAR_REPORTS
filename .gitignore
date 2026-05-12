@@ -1,0 +1,20 @@
+node_modules/
+dist/
+out/
+release/
+*.log
+*.tsbuildinfo
+.env
+.env.local
+*.local
+.DS_Store
+Thumbs.db
+# Prisma local SQLite (dev only)
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+# Electron build artefacts
+apps/desktop/dist/
+apps/desktop/out/
+apps/desktop/release/
+# Generated report PDFs (dev scratch)
+generated-reports/

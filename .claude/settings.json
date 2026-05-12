@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\Jainish\\\\.claude\\\\projects\\\\g--Project-report-software\\\\memory\\\\\" 2>&1; echo \"---\"; cat \"C:\\\\Users\\\\Jainish\\\\.claude\\\\projects\\\\g--Project-report-software\\\\memory\\\\MEMORY.md\" 2>&1)",
+      "Read(//c/Users/Jainish/.claude/projects/g--Project-report-software/**)"
+    ]
+  }
+}

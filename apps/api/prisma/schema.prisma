@@ -1,0 +1,95 @@
+// Prisma schema for the medical report software.
+//
+// DEV  : SQLite (zero setup — just `npm run db:migrate`).
+// PROD : switch `provider` to "postgresql" and point DATABASE_URL at the
+//        PostgreSQL instance on your "server" PC. Then run `prisma migrate deploy`.
+//
+// NOTE: roles/statuses are stored as strings (not Prisma enums) so the schema
+// works unchanged on both SQLite and PostgreSQL. Allowed values live in
+// src/constants.ts and are validated by zod at the API boundary.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite" // change to "postgresql" for production
+  url      = env("DATABASE_URL")
+}
+
+/// Application user (clinic staff). Authentication + role-based access.
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  fullName     String
+  passwordHash String
+  role         String   @default("STAFF") // ADMIN | DOCTOR | STAFF
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  reports   Report[]    @relation("ReportAuthor")
+  auditLogs AuditLog[]
+}
+
+/// A patient record.
+model Patient {
+  id          String    @id @default(cuid())
+  mrn         String    @unique // Medical Record Number
+  firstName   String
+  lastName    String
+  dateOfBirth DateTime
+  sex         String // M | F | OTHER
+  phone       String?
+  email       String?
+  address     String?
+  notes       String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  reports Report[]
+
+  @@index([lastName, firstName])
+}
+
+/// A medical report generated for a patient. `data` holds the structured
+/// findings as JSON (kept generic so report types can evolve without migrations).
+model Report {
+  id          String    @id @default(cuid())
+  reportNo    String    @unique // human-friendly, e.g. RPT-2026-000123
+  type        String // e.g. "LAB", "RADIOLOGY", "DISCHARGE_SUMMARY"
+  title       String
+  status      String    @default("DRAFT") // DRAFT | FINAL | AMENDED
+  data        String // JSON string: { sections: [{ heading, rows: [...] }], ... }
+  pdfPath     String? // last exported PDF location (on a shared folder, USB, etc.)
+  reportDate  DateTime  @default(now())
+  finalizedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  patient   Patient @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  patientId String
+  author    User    @relation("ReportAuthor", fields: [authorId], references: [id])
+  authorId  String
+
+  @@index([patientId])
+  @@index([reportDate])
+}
+
+/// Append-only audit trail. Required for medical software: records who did
+/// what, to which record, when, and from where. Never updated or deleted.
+model AuditLog {
+  id         String   @id @default(cuid())
+  action     String // CREATE | READ | UPDATE | DELETE | LOGIN | EXPORT_PDF | PRINT
+  entity     String // "Patient" | "Report" | "User" | "Auth"
+  entityId   String?
+  summary    String? // short human description
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+
+  actor   User?   @relation(fields: [actorId], references: [id])
+  actorId String?
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
