@@ -1,20 +1,21 @@
-node_modules/
-dist/
-out/
-release/
-*.log
-*.tsbuildinfo
-.env
-.env.local
-*.local
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# App data & generated output (do NOT commit patient data)
+/data/
+/output/
+
+# PyInstaller
+/build/
+/dist/
+
+# OS / editor
 .DS_Store
 Thumbs.db
-# Prisma local SQLite (dev only)
-apps/api/prisma/*.db
-apps/api/prisma/*.db-journal
-# Electron build artefacts
-apps/desktop/dist/
-apps/desktop/out/
-apps/desktop/release/
-# Generated report PDFs (dev scratch)
-generated-reports/
+.idea/
+.vscode/
