@@ -79,4 +79,22 @@ QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
 
 QCheckBox { spacing: 6px; }
 QDialog, QMessageBox { background: #ffffff; }
+
+/* ---- calendar popup (used by QDateEdit) ---- */
+QCalendarWidget QWidget { color: #1f2933; }
+QCalendarWidget QAbstractItemView:enabled {
+    background: #ffffff; color: #1f2933;
+    selection-background-color: #2f6fde; selection-color: #ffffff;
+}
+QCalendarWidget QAbstractItemView:disabled { color: #c0c6cf; }
+QCalendarWidget #qt_calendar_navigationbar { background: #f0f3f8; }
+QCalendarWidget QToolButton {
+    color: #1f2933; background: transparent; border: none;
+    padding: 6px 10px; margin: 1px; border-radius: 4px;
+}
+QCalendarWidget QToolButton:hover { background: #e3edff; }
+QCalendarWidget QSpinBox {
+    background: #ffffff; color: #1f2933; border: 1px solid #c7cfdb; border-radius: 4px;
+}
+QCalendarWidget QMenu { background: #ffffff; color: #1f2933; border: 1px solid #c7cfdb; }
 """

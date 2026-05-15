@@ -1,7 +1,7 @@
 """Settings: clinic / lab details (used on every report) and report-type list."""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton,
-    QFileDialog, QListWidget, QListWidgetItem, QMessageBox, QInputDialog, QFrame,
+    QFileDialog, QListWidget, QListWidgetItem, QInputDialog, QFrame,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -132,12 +132,16 @@ class SettingsPage(QWidget):
             self.logo_edit.setText(path)
 
     def _save_clinic(self):
-        self.main.db.update_settings(
-            self.name_edit.text().strip(), self.addr_edit.text().strip(),
-            self.phone_edit.text().strip(), self.email_edit.text().strip(),
-            self.logo_edit.text().strip(),
-        )
-        QMessageBox.information(self, "Saved", "Clinic information saved.")
+        try:
+            self.main.db.update_settings(
+                self.name_edit.text().strip(), self.addr_edit.text().strip(),
+                self.phone_edit.text().strip(), self.email_edit.text().strip(),
+                self.logo_edit.text().strip(),
+            )
+        except Exception:  # noqa: BLE001
+            self.main.toast_error("Could not save clinic info")
+            return
+        self.main.toast_success("Clinic info saved")
 
     # --------------------------------------------------------- type actions
     def _selected_type_id(self):
@@ -159,26 +163,28 @@ class SettingsPage(QWidget):
             return
         try:
             self.main.db.add_report_type(code.strip(), name.strip())
-        except Exception as exc:  # noqa: BLE001 - most likely a duplicate code
-            QMessageBox.warning(self, "Could not add", f"That code may already exist.\n\n{exc}")
+        except Exception:  # noqa: BLE001 - most likely a duplicate code
+            self.main.toast_error("Could not add — that code may already exist")
             return
         self._reload_types()
+        self.main.toast_success("Report type added")
 
     def _rename_type(self):
         type_id = self._selected_type_id()
         if type_id is None:
-            QMessageBox.information(self, "Select a type", "Please select a report type first.")
+            self.main.toast_error("Select a report type first")
             return
         name, ok = QInputDialog.getText(self, "Rename report type", "New name:",
                                         text=self._type_name(type_id))
         if ok and name.strip():
             self.main.db.update_report_type(type_id, name.strip())
             self._reload_types()
+            self.main.toast_success("Report type renamed")
 
     def _toggle_type(self):
         type_id = self._selected_type_id()
         if type_id is None:
-            QMessageBox.information(self, "Select a type", "Please select a report type first.")
+            self.main.toast_error("Select a report type first")
             return
         for t in self.main.db.get_report_types(active_only=False):
             if t["id"] == type_id:

@@ -40,6 +40,76 @@ def _content_html(text):
     return "\n".join(out) if out else '<p style="color:#888;">&mdash; no content &mdash;</p>'
 
 
+# Flag -> text colour for the result + reference cells in tabular reports.
+_FLAG_COLOR = {
+    "Low": "#1d4ed8",       # blue
+    "High": "#b91c1c",      # red
+    "Abnormal": "#b91c1c",  # red (qualitative mismatch)
+}
+
+
+def _tabular_body_html(test_rows):
+    """Image-2-style table: Investigation | Result | Reference | Unit.
+
+    Section names from `templates.py` become coloured full-width header rows.
+    Abnormal rows tint the Result and Reference cells; the flag word is shown
+    as a bold prefix in the Reference cell.
+    """
+    if not test_rows:
+        return ""
+    parts = [
+        '<table width="100%" cellspacing="0" cellpadding="6" border="0">',
+        '<tr>'
+        '<th align="left" width="40%" bgcolor="#f4f6f9" '
+        'style="color: #14315a; font-size: 10pt;">Investigation</th>'
+        '<th align="left" width="20%" bgcolor="#f4f6f9" '
+        'style="color: #14315a; font-size: 10pt;">Result</th>'
+        '<th align="left" width="25%" bgcolor="#f4f6f9" '
+        'style="color: #14315a; font-size: 10pt;">Reference Value</th>'
+        '<th align="left" width="15%" bgcolor="#f4f6f9" '
+        'style="color: #14315a; font-size: 10pt;">Unit</th>'
+        '</tr>',
+        '<tr><td colspan="4" bgcolor="#14315a" height="2"></td></tr>',
+    ]
+    current_section = None
+    for r in test_rows:
+        # accept both sqlite3.Row and plain dict
+        section = (r["section"] if "section" in r.keys() else r.get("section")) if hasattr(r, "keys") else r.get("section")
+        section = section or ""
+        if section != current_section:
+            current_section = section
+            if section:
+                parts.append(
+                    f'<tr><td colspan="4" bgcolor="#eef2f7" '
+                    f'style="font-weight: bold; color: #14315a; font-size: 10pt;">'
+                    f'{_esc(section)}</td></tr>'
+                )
+        param = _row_get(r, "parameter")
+        value = _row_get(r, "value")
+        unit = _row_get(r, "unit")
+        reference = _row_get(r, "reference")
+        flag = _row_get(r, "flag")
+
+        colour = _FLAG_COLOR.get(flag, "")
+        value_style = (
+            f'color: {colour}; font-weight: 600;' if colour else 'font-weight: 600;'
+        )
+        ref_style = f'color: {colour};' if colour else 'color: #5a6573;'
+        flag_prefix = (
+            f'<b>{_esc(flag)}</b>&nbsp;&nbsp;' if flag in ("Low", "High", "Abnormal") else ''
+        )
+        parts.append(
+            f'<tr>'
+            f'<td><b>{_esc(param)}</b></td>'
+            f'<td style="{value_style}">{_esc(value)}</td>'
+            f'<td style="{ref_style}">{flag_prefix}{_esc(reference)}</td>'
+            f'<td style="color: #5a6573;">{_esc(unit)}</td>'
+            f'</tr>'
+        )
+    parts.append('</table>')
+    return "".join(parts)
+
+
 def _age_sex(report):
     age = calculate_age(_row_get(report, "p_dob", None))
     sex = _row_get(report, "p_sex")
@@ -51,7 +121,9 @@ def _age_sex(report):
 
 
 # ---------------------------------------------------------------- HTML
-def render_report_html(report, settings):
+def render_report_html(report, settings, test_rows=None):
+    """Build the report HTML. If `test_rows` is non-empty, render the tabular
+    body (image-2 style); otherwise fall back to the free-text content."""
     clinic_name = _row_get(settings, "clinic_name", "Diagnostic Centre")
     address = _row_get(settings, "address")
     phone = _row_get(settings, "phone")
@@ -83,6 +155,14 @@ def render_report_html(report, settings):
     footer_note = ("This is an electronically generated report &mdash; verify with the "
                    "laboratory before clinical use." if is_draft
                    else "This is an electronically generated report.")
+
+    if test_rows:
+        body_html = _tabular_body_html(test_rows)
+    else:
+        body_html = (
+            '<p class="section-h">FINDINGS / REPORT</p>'
+            + _content_html(_row_get(report, "content"))
+        )
 
     return f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><style>
@@ -128,8 +208,7 @@ p {{ margin: 4px 0; line-height: 140%; }}
 
 <p class="title">{_esc(title_text)}</p>
 
-<p class="section-h">FINDINGS / REPORT</p>
-{_content_html(_row_get(report, "content"))}
+{body_html}
 
 {impression_html}
 
@@ -159,25 +238,25 @@ def _make_printer(output_path=None):
     return printer
 
 
-def _document(report, settings):
+def _document(report, settings, test_rows=None):
     doc = QTextDocument()
-    doc.setHtml(render_report_html(report, settings))
+    doc.setHtml(render_report_html(report, settings, test_rows))
     return doc
 
 
-def export_report_pdf(report, settings, output_path):
+def export_report_pdf(report, settings, output_path, test_rows=None):
     """Write the report to `output_path` as a PDF. Raises on failure."""
     printer = _make_printer(output_path)
-    _document(report, settings).print_(printer)
+    _document(report, settings, test_rows).print_(printer)
 
 
-def print_report(report, settings, parent=None):
+def print_report(report, settings, parent=None, test_rows=None):
     """Show the system print dialog and print the report. Returns True if printed."""
     printer = _make_printer()
     dialog = QPrintDialog(printer, parent)
     if dialog.exec() != QPrintDialog.Accepted:
         return False
-    _document(report, settings).print_(printer)
+    _document(report, settings, test_rows).print_(printer)
     return True
 
 

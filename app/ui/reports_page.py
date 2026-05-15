@@ -127,23 +127,24 @@ class ReportsPage(QWidget):
     def _open_selected(self, *_):
         rid = self._selected_id()
         if rid is None:
-            QMessageBox.information(self, "Select a report", "Please select a report first.")
+            self.main.toast_error("Select a report first")
             return
         self.main.show_preview(rid)
 
     def _edit_selected(self):
         rid = self._selected_id()
         if rid is None:
-            QMessageBox.information(self, "Select a report", "Please select a report first.")
+            self.main.toast_error("Select a report first")
             return
         self.main.edit_report(rid)
 
     def _delete_selected(self):
         rid = self._selected_id()
         if rid is None:
-            QMessageBox.information(self, "Select a report", "Please select a report first.")
+            self.main.toast_error("Select a report first")
             return
         if QMessageBox.question(self, "Delete report",
                                 "Delete this report? This cannot be undone.") == QMessageBox.Yes:
             self.main.db.delete_report(rid)
             self._reload()
+            self.main.toast_success("Report deleted")

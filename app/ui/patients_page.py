@@ -89,27 +89,36 @@ class PatientsPage(QWidget):
     def _add_patient(self):
         dlg = PatientDialog(self)
         if dlg.exec() == QDialog.Accepted:
-            self.main.db.add_patient(**dlg.values())
+            try:
+                self.main.db.add_patient(**dlg.values())
+            except Exception:  # noqa: BLE001 - surface any DB failure as a toast
+                self.main.toast_error("Could not add patient")
+                return
             self._reload()
-            QMessageBox.information(self, "Patient added", "Patient registered successfully.")
+            self.main.toast_success("Patient registered")
 
     def _edit_patient(self, *_):
         pid = self._selected_id()
         if pid is None:
-            QMessageBox.information(self, "Select a patient", "Please select a patient first.")
+            self.main.toast_error("Select a patient first")
             return
         row = self.main.db.get_patient(pid)
         if row is None:
             return
         dlg = PatientDialog(self, patient_row=row)
         if dlg.exec() == QDialog.Accepted:
-            self.main.db.update_patient(pid, **dlg.values())
+            try:
+                self.main.db.update_patient(pid, **dlg.values())
+            except Exception:  # noqa: BLE001
+                self.main.toast_error("Could not update patient")
+                return
             self._reload()
+            self.main.toast_success("Patient updated")
 
     def _delete_patient(self):
         pid = self._selected_id()
         if pid is None:
-            QMessageBox.information(self, "Select a patient", "Please select a patient first.")
+            self.main.toast_error("Select a patient first")
             return
         row = self.main.db.get_patient(pid)
         name = f'{row["first_name"]} {row["last_name"]}'.strip()
@@ -120,10 +129,11 @@ class PatientsPage(QWidget):
         if confirm == QMessageBox.Yes:
             self.main.db.delete_patient(pid)
             self._reload()
+            self.main.toast_success("Patient deleted")
 
     def _new_report(self):
         pid = self._selected_id()
         if pid is None:
-            QMessageBox.information(self, "Select a patient", "Please select a patient first.")
+            self.main.toast_error("Select a patient first")
             return
         self.main.go_new_report(pid)

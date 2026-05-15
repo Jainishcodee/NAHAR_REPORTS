@@ -60,9 +60,22 @@ CREATE TABLE IF NOT EXISTS settings (
     logo_path   TEXT
 );
 
+CREATE TABLE IF NOT EXISTS test_results (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id  INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    section    TEXT,
+    parameter  TEXT NOT NULL,
+    value      TEXT,
+    unit       TEXT,
+    reference  TEXT,
+    flag       TEXT,
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_patients_name ON patients(last_name, first_name);
 CREATE INDEX IF NOT EXISTS idx_reports_patient ON reports(patient_id);
 CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(report_date);
+CREATE INDEX IF NOT EXISTS idx_test_results_report ON test_results(report_id);
 """
 
 # Columns the UI is allowed to update on an existing report.
@@ -293,6 +306,38 @@ class Database:
             return conn.execute(
                 "SELECT COUNT(*) AS c FROM reports WHERE report_date = ?", (date_iso,)
             ).fetchone()["c"]
+
+    # ----------------------------------------------------------- test results
+    def replace_test_results(self, report_id, rows):
+        """Wipe existing rows for this report and insert the new set (atomic)."""
+        with self.connect() as conn:
+            conn.execute("DELETE FROM test_results WHERE report_id=?", (report_id,))
+            if rows:
+                conn.executemany(
+                    """INSERT INTO test_results
+                       (report_id, section, parameter, value, unit, reference, flag, sort_order)
+                       VALUES (?,?,?,?,?,?,?,?)""",
+                    [
+                        (report_id, r.get("section", ""), r["parameter"],
+                         r.get("value", ""), r.get("unit", ""), r.get("reference", ""),
+                         r.get("flag", ""), r.get("sort_order", i))
+                        for i, r in enumerate(rows)
+                    ],
+                )
+
+    def get_test_results(self, report_id):
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM test_results WHERE report_id=? ORDER BY sort_order, id",
+                (report_id,),
+            ).fetchall()
+
+    def has_test_results(self, report_id) -> bool:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT EXISTS(SELECT 1 FROM test_results WHERE report_id=?) AS e",
+                (report_id,),
+            ).fetchone()["e"] == 1
 
     def recent_reports(self, limit=12):
         with self.connect() as conn:

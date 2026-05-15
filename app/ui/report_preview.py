@@ -55,13 +55,19 @@ class ReportPreviewPage(QWidget):
             self.main.go_reports()
             return
         settings = self.main.db.get_settings()
+        test_rows = [dict(r) for r in self.main.db.get_test_results(report_id)]
         self.title_label.setText(f"{report['report_no'] or ''}   ·   {report['title'] or ''}".strip(" ·"))
-        self.browser.setHtml(pdfmod.render_report_html(report, settings))
+        self.browser.setHtml(pdfmod.render_report_html(report, settings, test_rows))
         is_final = (report["status"] or "").lower() == "final"
         self.status_btn.setText("Mark as Draft" if is_final else "Mark as Final")
 
     def _report_and_settings(self):
         return self.main.db.get_report(self.report_id), self.main.db.get_settings()
+
+    def _test_rows(self):
+        if self.report_id is None:
+            return []
+        return [dict(r) for r in self.main.db.get_test_results(self.report_id)]
 
     # -------------------------------------------------------------- actions
     def _toggle_status(self):
@@ -87,7 +93,7 @@ class ReportPreviewPage(QWidget):
         if not path:
             return
         try:
-            pdfmod.export_report_pdf(report, settings, path)
+            pdfmod.export_report_pdf(report, settings, path, self._test_rows())
         except Exception as exc:  # noqa: BLE001 - surface any Qt/IO failure to the user
             QMessageBox.critical(self, "PDF error", f"Could not create the PDF:\n{exc}")
             return
@@ -101,6 +107,6 @@ class ReportPreviewPage(QWidget):
         if report is None:
             return
         try:
-            pdfmod.print_report(report, settings, self)
+            pdfmod.print_report(report, settings, self, self._test_rows())
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(self, "Print error", f"Could not print:\n{exc}")

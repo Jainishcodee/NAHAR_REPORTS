@@ -13,6 +13,7 @@ from app.ui.new_report_page import NewReportPage
 from app.ui.reports_page import ReportsPage
 from app.ui.report_preview import ReportPreviewPage
 from app.ui.settings_page import SettingsPage
+from app.ui.toast import Toast
 
 
 class MainWindow(QMainWindow):
@@ -37,6 +38,7 @@ class MainWindow(QMainWindow):
             self.stack.addWidget(page)
 
         self.nav_buttons = {}
+        self._toast = None
         central = QWidget()
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -123,3 +125,19 @@ class MainWindow(QMainWindow):
         self.preview_page.show_report(report_id)
         self.stack.setCurrentWidget(self.preview_page)
         self._activate_nav("reports")
+
+    # ----------------------------------------------------------- feedback
+    def toast_success(self, text):
+        self._show_toast(text, "success")
+
+    def toast_error(self, text):
+        self._show_toast(text, "error")
+
+    def _show_toast(self, text, kind):
+        if self._toast is not None:
+            try:
+                self._toast.deleteLater()
+            except RuntimeError:
+                pass
+        self._toast = Toast(self, text, kind)
+        self._toast.show()
