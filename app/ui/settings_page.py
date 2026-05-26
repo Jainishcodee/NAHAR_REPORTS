@@ -1,7 +1,7 @@
 """Settings: clinic / lab details (used on every report) and report-type list."""
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel, QLineEdit, QPushButton,
-    QFileDialog, QListWidget, QListWidgetItem, QInputDialog, QFrame,
+    QFileDialog, QListWidget, QListWidgetItem, QInputDialog, QFrame, QDialog,
 )
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -81,21 +81,26 @@ class SettingsPage(QWidget):
         lbl = QLabel("Report types")
         lbl.setObjectName("SectionTitle")
         tv.addWidget(lbl)
-        hint = QLabel("These are the options in the 'Report type' dropdown when creating a report.")
+        hint = QLabel("Options in the 'Report type' dropdown. 'Edit fields' defines a "
+                      "type's structured table (parameters + recommended reference values).")
         hint.setObjectName("Muted")
         hint.setWordWrap(True)
         tv.addWidget(hint)
 
         self.types_list = QListWidget()
+        self.types_list.doubleClicked.connect(self._edit_template)
         tv.addWidget(self.types_list, 1)
         btns = QHBoxLayout()
-        add_btn = QPushButton("Add")
+        add_btn = QPushButton("Add type")
         add_btn.clicked.connect(self._add_type)
+        fields_btn = QPushButton("Edit fields…")
+        fields_btn.setObjectName("PrimaryButton")
+        fields_btn.clicked.connect(self._edit_template)
         rename_btn = QPushButton("Rename")
         rename_btn.clicked.connect(self._rename_type)
         toggle_btn = QPushButton("Enable / Disable")
         toggle_btn.clicked.connect(self._toggle_type)
-        for b in (add_btn, rename_btn, toggle_btn):
+        for b in (add_btn, fields_btn, rename_btn, toggle_btn):
             btns.addWidget(b)
         btns.addStretch(1)
         tv.addLayout(btns)
@@ -114,7 +119,9 @@ class SettingsPage(QWidget):
     def _reload_types(self):
         self.types_list.clear()
         for t in self.main.db.get_report_types(active_only=False):
-            label = f'{t["name"]}   ({t["code"]})'
+            n = len(self.main.db.get_template_params(t["id"]))
+            fields = f"{n} field{'s' if n != 1 else ''}" if n else "free-text"
+            label = f'{t["name"]}   ({t["code"]})   ·   {fields}'
             if not t["is_active"]:
                 label += "   — disabled"
             item = QListWidgetItem(label)
@@ -155,19 +162,37 @@ class SettingsPage(QWidget):
         return ""
 
     def _add_type(self):
-        name, ok = QInputDialog.getText(self, "Add report type", "Name (e.g. 'PET Scan'):")
+        name, ok = QInputDialog.getText(self, "Add report type", "Name (e.g. 'Blood Pressure'):")
         if not ok or not name.strip():
             return
-        code, ok = QInputDialog.getText(self, "Add report type", "Short code (e.g. 'PET'):")
+        code, ok = QInputDialog.getText(self, "Add report type", "Short code (e.g. 'BP'):")
         if not ok or not code.strip():
             return
         try:
-            self.main.db.add_report_type(code.strip(), name.strip())
+            new_id = self.main.db.add_report_type(code.strip(), name.strip())
         except Exception:  # noqa: BLE001 - most likely a duplicate code
             self.main.toast_error("Could not add — that code may already exist")
             return
         self._reload_types()
         self.main.toast_success("Report type added")
+        # immediately offer to define its fields (Cancel leaves it as free-text)
+        self._open_template_editor(new_id, name.strip())
+
+    def _edit_template(self, *_):
+        type_id = self._selected_type_id()
+        if type_id is None:
+            self.main.toast_error("Select a report type first")
+            return
+        self._open_template_editor(type_id, self._type_name(type_id))
+
+    def _open_template_editor(self, type_id, type_name):
+        from app.ui.template_editor import TemplateEditorDialog
+        params = self.main.db.get_template_params(type_id)
+        dlg = TemplateEditorDialog(self, type_name, params)
+        if dlg.exec() == QDialog.Accepted:
+            self.main.db.replace_template_params(type_id, dlg.result_params())
+            self._reload_types()
+            self.main.toast_success("Template saved")
 
     def _rename_type(self):
         type_id = self._selected_type_id()

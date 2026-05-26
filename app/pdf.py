@@ -106,6 +106,14 @@ def _tabular_body_html(test_rows):
             f'<td style="color: #5a6573;">{_esc(unit)}</td>'
             f'</tr>'
         )
+        description = _row_get(r, "description")
+        if description and str(description).strip():
+            parts.append(
+                f'<tr><td colspan="4" '
+                f'style="padding: 0 6px 8px 24px; color: #5a6573; '
+                f'font-style: italic; font-size: 9.5pt;">'
+                f'↳ {_esc(description)}</td></tr>'
+            )
     parts.append('</table>')
     return "".join(parts)
 

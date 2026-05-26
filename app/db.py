@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import datetime
 
 from app.config import DB_PATH, DEFAULT_REPORT_TYPES, DEFAULT_CLINIC
+from app.templates import Param, TEMPLATES
 
 
 SCHEMA = """
@@ -61,21 +62,46 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 CREATE TABLE IF NOT EXISTS test_results (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    report_id  INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
-    section    TEXT,
-    parameter  TEXT NOT NULL,
-    value      TEXT,
-    unit       TEXT,
-    reference  TEXT,
-    flag       TEXT,
-    sort_order INTEGER NOT NULL DEFAULT 0
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_id   INTEGER NOT NULL REFERENCES reports(id) ON DELETE CASCADE,
+    section     TEXT,
+    parameter   TEXT NOT NULL,
+    value       TEXT,
+    unit        TEXT,
+    reference   TEXT,
+    flag        TEXT,
+    sort_order  INTEGER NOT NULL DEFAULT 0,
+    description TEXT DEFAULT ''
+);
+
+-- Editable structured-report templates. One row per parameter of a report type.
+CREATE TABLE IF NOT EXISTS template_params (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_type_id  INTEGER NOT NULL REFERENCES report_types(id) ON DELETE CASCADE,
+    sort_order      INTEGER NOT NULL DEFAULT 0,
+    section         TEXT,
+    name            TEXT NOT NULL,
+    unit            TEXT,
+    ref_low         REAL,
+    ref_high        REAL,
+    ref_low_male    REAL,
+    ref_high_male   REAL,
+    ref_low_female  REAL,
+    ref_high_female REAL,
+    expected        TEXT,
+    note            TEXT
+);
+
+CREATE TABLE IF NOT EXISTS app_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_patients_name ON patients(last_name, first_name);
 CREATE INDEX IF NOT EXISTS idx_reports_patient ON reports(patient_id);
 CREATE INDEX IF NOT EXISTS idx_reports_date ON reports(report_date);
 CREATE INDEX IF NOT EXISTS idx_test_results_report ON test_results(report_id);
+CREATE INDEX IF NOT EXISTS idx_template_params_type ON template_params(report_type_id);
 """
 
 # Columns the UI is allowed to update on an existing report.
@@ -112,6 +138,7 @@ class Database:
     def _init_schema(self):
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            self._apply_migrations(conn)
             if conn.execute("SELECT COUNT(*) AS c FROM report_types").fetchone()["c"] == 0:
                 conn.executemany(
                     "INSERT INTO report_types (code, name) VALUES (?, ?)", DEFAULT_REPORT_TYPES
@@ -123,6 +150,59 @@ class Database:
                     (DEFAULT_CLINIC["clinic_name"], DEFAULT_CLINIC["address"],
                      DEFAULT_CLINIC["phone"], DEFAULT_CLINIC["email"], DEFAULT_CLINIC["logo_path"]),
                 )
+            self._seed_templates(conn)
+
+    @staticmethod
+    def _apply_migrations(conn):
+        """Idempotent column additions for databases created before a column existed."""
+        existing = {r["name"] for r in conn.execute("PRAGMA table_info(test_results)").fetchall()}
+        if "description" not in existing:
+            conn.execute("ALTER TABLE test_results ADD COLUMN description TEXT DEFAULT ''")
+
+    @staticmethod
+    def _insert_params(conn, type_id, params):
+        conn.executemany(
+            """INSERT INTO template_params
+               (report_type_id, sort_order, section, name, unit, ref_low, ref_high,
+                ref_low_male, ref_high_male, ref_low_female, ref_high_female, expected, note)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                (type_id, i, p.section, p.name, p.unit, p.ref_low, p.ref_high,
+                 p.ref_low_male, p.ref_high_male, p.ref_low_female, p.ref_high_female,
+                 p.expected, p.note)
+                for i, p in enumerate(params)
+            ],
+        )
+
+    def _seed_templates(self, conn):
+        """Populate template_params from the built-in TEMPLATES, once.
+
+        Runs for fresh AND existing databases (gated by an app_meta flag) so
+        the built-in templates appear without wiping any edits the user later
+        makes. After seeding, templates are fully DB-driven and editable.
+        """
+        flag = conn.execute(
+            "SELECT value FROM app_meta WHERE key='templates_seeded'"
+        ).fetchone()
+        if flag and flag["value"] == "1":
+            return
+        type_by_code = {
+            r["code"]: r["id"]
+            for r in conn.execute("SELECT id, code FROM report_types").fetchall()
+        }
+        for code, params in TEMPLATES.items():
+            tid = type_by_code.get(code)
+            if tid is None:
+                continue
+            already = conn.execute(
+                "SELECT 1 FROM template_params WHERE report_type_id=? LIMIT 1", (tid,)
+            ).fetchone()
+            if already:
+                continue
+            self._insert_params(conn, tid, params)
+        conn.execute(
+            "INSERT OR REPLACE INTO app_meta (key, value) VALUES ('templates_seeded', '1')"
+        )
 
     # -------------------------------------------------------------- settings
     def get_settings(self):
@@ -147,8 +227,9 @@ class Database:
 
     def add_report_type(self, code, name):
         with self.connect() as conn:
-            conn.execute("INSERT INTO report_types (code, name) VALUES (?, ?)",
-                         (code.strip().upper(), name.strip()))
+            cur = conn.execute("INSERT INTO report_types (code, name) VALUES (?, ?)",
+                               (code.strip().upper(), name.strip()))
+            return cur.lastrowid
 
     def update_report_type(self, type_id, name):
         with self.connect() as conn:
@@ -158,6 +239,44 @@ class Database:
         with self.connect() as conn:
             conn.execute("UPDATE report_types SET is_active=? WHERE id=?",
                          (1 if active else 0, type_id))
+
+    # --------------------------------------------------- template params
+    @staticmethod
+    def _row_to_param(r) -> Param:
+        return Param(
+            name=r["name"],
+            unit=r["unit"] or "",
+            section=r["section"] or "",
+            ref_low=r["ref_low"], ref_high=r["ref_high"],
+            ref_low_male=r["ref_low_male"], ref_high_male=r["ref_high_male"],
+            ref_low_female=r["ref_low_female"], ref_high_female=r["ref_high_female"],
+            expected=r["expected"], note=r["note"] or "",
+        )
+
+    def get_template_params(self, type_id) -> list[Param]:
+        """Return the template (as Param objects) for a report-type id."""
+        if type_id is None:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM template_params WHERE report_type_id=? ORDER BY sort_order, id",
+                (type_id,),
+            ).fetchall()
+        return [self._row_to_param(r) for r in rows]
+
+    def type_has_template(self, type_id) -> bool:
+        if type_id is None:
+            return False
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT 1 FROM template_params WHERE report_type_id=? LIMIT 1", (type_id,)
+            ).fetchone() is not None
+
+    def replace_template_params(self, type_id, params):
+        """Overwrite the whole template for a report type with `params` (list[Param])."""
+        with self.connect() as conn:
+            conn.execute("DELETE FROM template_params WHERE report_type_id=?", (type_id,))
+            self._insert_params(conn, type_id, params)
 
     # --------------------------------------------------------------- patients
     def add_patient(self, **f):
@@ -315,15 +434,42 @@ class Database:
             if rows:
                 conn.executemany(
                     """INSERT INTO test_results
-                       (report_id, section, parameter, value, unit, reference, flag, sort_order)
-                       VALUES (?,?,?,?,?,?,?,?)""",
+                       (report_id, section, parameter, value, unit, reference, flag,
+                        sort_order, description)
+                       VALUES (?,?,?,?,?,?,?,?,?)""",
                     [
                         (report_id, r.get("section", ""), r["parameter"],
                          r.get("value", ""), r.get("unit", ""), r.get("reference", ""),
-                         r.get("flag", ""), r.get("sort_order", i))
+                         r.get("flag", ""), r.get("sort_order", i),
+                         r.get("description", "") or "")
                         for i, r in enumerate(rows)
                     ],
                 )
+
+    def get_description_suggestions(self, param_names):
+        """Return {parameter_name: [past descriptions, most recent first]}.
+
+        Powers the auto-complete on the per-parameter note field — so a description
+        the user has written once for, say, 'Hemoglobin (Hb)' is offered as a
+        suggestion the next time they create a report with that parameter.
+        """
+        if not param_names:
+            return {}
+        placeholders = ",".join(["?"] * len(param_names))
+        with self.connect() as conn:
+            rows = conn.execute(
+                f"""SELECT parameter, description, MAX(id) AS recent
+                    FROM test_results
+                    WHERE parameter IN ({placeholders})
+                      AND description IS NOT NULL AND TRIM(description) != ''
+                    GROUP BY parameter, description
+                    ORDER BY recent DESC""",
+                list(param_names),
+            ).fetchall()
+        out = {name: [] for name in param_names}
+        for r in rows:
+            out[r["parameter"]].append(r["description"])
+        return out
 
     def get_test_results(self, report_id):
         with self.connect() as conn:

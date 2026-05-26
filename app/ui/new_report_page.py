@@ -15,7 +15,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.models import calculate_age
-from app.templates import get_template, has_template, rows_to_text
+from app.templates import rows_to_text
 from app.ui.patient_form import PatientDialog
 from app.ui.structured_results import StructuredResultsWidget
 
@@ -52,7 +52,8 @@ class NewReportPage(QWidget):
         super().__init__()
         self.main = main
         self.editing_id = None
-        self._current_template_code: str = ""
+        self._structured_params = []        # list[Param] currently in the table
+        self._structured_type_id = None     # which report-type id the table is for
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -220,17 +221,23 @@ class NewReportPage(QWidget):
         return (data[0], data[1], data[2] or "")
 
     # ---------------------------------------------------- mode handling
-    def _switch_to_structured(self, code: str, sex: str = "", saved_rows=None):
-        params = get_template(code)
-        self.structured.load_template(params, sex=sex)
+    def _switch_to_structured(self, params, type_id, sex="", saved_rows=None):
+        self._structured_params = list(params)
+        self._structured_type_id = type_id
+        suggestions = self.main.db.get_description_suggestions(
+            [p.name for p in self._structured_params]
+        )
+        self.structured.load_template(
+            self._structured_params, sex=sex, description_suggestions=suggestions,
+        )
         if saved_rows:
             self.structured.populate_from_saved(saved_rows)
-        self._current_template_code = code
-        self._structured_header.setText(f"Test results *  ·  {code} template")
+        self._structured_header.setText(f"Test results *  ·  {len(self._structured_params)} parameters")
         self.content_stack.setCurrentIndex(_MODE_STRUCTURED)
 
     def _switch_to_free_text(self):
-        self._current_template_code = ""
+        self._structured_params = []
+        self._structured_type_id = None
         self.content_stack.setCurrentIndex(_MODE_FREE)
 
     def _is_structured_mode(self) -> bool:
@@ -290,9 +297,11 @@ class NewReportPage(QWidget):
         # Decide mode: structured if test_results exist; else free-text
         saved_rows = self.main.db.get_test_results(report_id) if self.main.db.has_test_results(report_id) else []
         if saved_rows:
-            _, _, code = self._current_type()
-            if has_template(code):
-                self._switch_to_structured(code, sex=self._current_patient_sex(), saved_rows=saved_rows)
+            type_id = self._current_type()[0]
+            params = self.main.db.get_template_params(type_id)
+            if params:
+                self._switch_to_structured(params, type_id,
+                                           sex=self._current_patient_sex(), saved_rows=saved_rows)
             else:
                 # Type lost its template — show the data as text
                 self.content_edit.setPlainText(rows_to_text([dict(r) for r in saved_rows]))
@@ -340,9 +349,10 @@ class NewReportPage(QWidget):
         # whether the report actually has test_results saved.
         if self.editing_id is not None:
             return
-        if has_template(type_code):
-            if self._current_template_code != type_code:
-                self._switch_to_structured(type_code, sex=self._current_patient_sex())
+        params = self.main.db.get_template_params(type_id)
+        if params:
+            if self._structured_type_id != type_id:
+                self._switch_to_structured(params, type_id, sex=self._current_patient_sex())
         else:
             self._switch_to_free_text()
 
@@ -354,11 +364,10 @@ class NewReportPage(QWidget):
 
     def _smart_paste(self):
         from app.ui.smart_paste_dialog import SmartPasteDialog
-        if not self._current_template_code:
+        if not self._structured_params:
             self.main.toast_error("Pick a structured report type first")
             return
-        params = get_template(self._current_template_code)
-        dlg = SmartPasteDialog(self, params)
+        dlg = SmartPasteDialog(self, self._structured_params)
         if dlg.exec() != QDialog.Accepted:
             return
         matched, total = dlg.matched_pairs()

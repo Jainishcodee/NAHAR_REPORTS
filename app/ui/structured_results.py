@@ -6,10 +6,10 @@ Flag is recomputed every time the user types in a Result cell, and every time
 the patient's sex changes (which can change the reference range).
 """
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QAbstractItemView, QHeaderView, QLineEdit, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QCompleter, QHeaderView, QLineEdit, QTableWidget,
+    QTableWidgetItem, QVBoxLayout, QWidget,
 )
 
 from app.templates import Param, compute_flag, reference_text
@@ -32,6 +32,7 @@ class StructuredResultsWidget(QWidget):
         super().__init__()
         self._entries: list[dict] = []
         self._sex: str = ""
+        self._description_suggestions: dict[str, list[str]] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -57,9 +58,16 @@ class StructuredResultsWidget(QWidget):
         layout.addWidget(self.table)
 
     # --------------------------------------------------------------- build
-    def load_template(self, params: list[Param], sex: str = ""):
-        """Rebuild the table from a template. Existing values are discarded."""
+    def load_template(self, params: list[Param], sex: str = "",
+                       description_suggestions: dict | None = None):
+        """Rebuild the table from a template. Existing values are discarded.
+
+        `description_suggestions` maps parameter name -> list of past description
+        strings used on prior reports; each row's note input gets a QCompleter
+        populated from its parameter's history.
+        """
         self._sex = sex or ""
+        self._description_suggestions = description_suggestions or {}
         self._entries = []
         self.table.clearSpans()
         self.table.setRowCount(0)
@@ -140,9 +148,36 @@ class StructuredResultsWidget(QWidget):
         else:
             self.table.setRowHeight(row, 30)
 
+        # --- description sub-row (optional per-report note for this parameter) ---
+        desc_row = self.table.rowCount()
+        self.table.insertRow(desc_row)
+        # blank backing items so the band has a continuous background colour
+        for col in range(5):
+            cell = QTableWidgetItem("")
+            cell.setBackground(QBrush(QColor("#fafbfd")))
+            cell.setFlags(Qt.ItemIsEnabled)
+            self.table.setItem(desc_row, col, cell)
+        self.table.setSpan(desc_row, 0, 1, 5)
+        desc_edit = QLineEdit()
+        desc_edit.setFrame(False)
+        desc_edit.setPlaceholderText("↳  Add a note (optional, shown in the report)")
+        desc_edit.setStyleSheet(
+            "QLineEdit { padding: 2px 8px 4px 22px; color: #4a5562; background: #fafbfd; "
+            "font-size: 9pt; font-style: italic; }"
+        )
+        suggestions = self._description_suggestions.get(p.name, [])
+        if suggestions:
+            completer = QCompleter(suggestions, desc_edit)
+            completer.setCaseSensitivity(Qt.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchContains)
+            desc_edit.setCompleter(completer)
+        self.table.setCellWidget(desc_row, 0, desc_edit)
+        self.table.setRowHeight(desc_row, 24)
+
         self._entries.append({
-            "param": p, "row": row,
+            "param": p, "row": row, "desc_row": desc_row,
             "line_edit": line_edit, "ref_item": ref_item, "flag_item": flag_item,
+            "desc_edit": desc_edit,
         })
 
     # ------------------------------------------------------------ updates
@@ -205,6 +240,7 @@ class StructuredResultsWidget(QWidget):
                 "reference": reference_text(p, self._sex),
                 "flag": compute_flag(value, p, self._sex),
                 "sort_order": sort_order,
+                "description": e["desc_edit"].text().strip(),
             })
         return out
 
@@ -216,6 +252,7 @@ class StructuredResultsWidget(QWidget):
             e["line_edit"].blockSignals(True)
             e["line_edit"].clear()
             e["line_edit"].blockSignals(False)
+            e["desc_edit"].clear()
             self._apply_flag(e, "")
 
     def populate_from_saved(self, saved_rows):
@@ -224,10 +261,18 @@ class StructuredResultsWidget(QWidget):
         Saved rows whose parameter name no longer matches anything in the
         current template are ignored (kept in DB until the next save).
         """
-        by_name = {r["parameter"]: r["value"] or "" for r in saved_rows}
+        def _get(row, key):
+            try:
+                v = row[key]
+            except (KeyError, IndexError):
+                return ""
+            return v or ""
+
+        by_name = {r["parameter"]: _get(r, "value") for r in saved_rows}
+        desc_by_name = {r["parameter"]: _get(r, "description") for r in saved_rows}
         for e in self._entries:
-            value = by_name.get(e["param"].name, "")
-            e["line_edit"].setText(value)
+            e["line_edit"].setText(by_name.get(e["param"].name, ""))
+            e["desc_edit"].setText(desc_by_name.get(e["param"].name, ""))
 
     def apply_pairs(self, matched: dict[str, str]) -> int:
         """Fill rows whose parameter name appears in `matched`.
